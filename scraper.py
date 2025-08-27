@@ -51,7 +51,7 @@ class GenZAcademicAnalyzer:
         # Obtenha sua chave em: https://console.groq.com/keys
         # Oferece 14.400 requisições por dia GRATUITAMENTE
         # ====================================================================
-        self.groq_api_key = "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"  # Substitua pela sua chave
+        self.groq_api_key = ""  # Substitua pela sua chave
         
         # Verificar se a API está configurada
         self.use_groq = (self.groq_api_key and 
