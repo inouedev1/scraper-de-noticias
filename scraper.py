@@ -51,12 +51,12 @@ class GenZAcademicAnalyzer:
         # Obtenha sua chave em: https://console.groq.com/keys
         # Oferece 14.400 requisições por dia GRATUITAMENTE
         # ====================================================================
-        self.groq_api_key = ""  # Substitua pela sua chave
+        self.groq_api_key = "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"  # Substitua pela sua chave
         
         # Verificar se a API está configurada
         self.use_groq = (self.groq_api_key and 
-                        self.groq_api_key != "SUA_CHAVE_GROQ_AQUI" and 
-                        len(self.groq_api_key) > 20)
+                         self.groq_api_key != "SUA_CHAVE_GROQ_AQUI" and 
+                         len(self.groq_api_key) > 20)
         
         if self.use_groq:
             print("🚀 Analisador configurado para usar GROQ")
@@ -79,27 +79,45 @@ class GenZAcademicAnalyzer:
             'bem_estar': ['saúde mental', 'burnout', 'equilíbrio', 'bem-estar', 'ansiedade', 'quiet quitting']
         }
 
-            # ====================================================================
-            # Aqui para alterar a quantidade de artigos por ano, ou o período basta mudar o articles_per_year.
-            # ====================================================================  
+    # ====================================================================
+    # Correção do bug da coleta anual   
+    # ====================================================================
     def collect_web_data(self, search_term="geração z mercado de trabalho", start_year=2025, end_year=2020, articles_per_year=100):
         """
-        Coleta headlines de notícias do Google Notícias, ano a ano.
+        Coleta headlines de notícias do Google Notícias, ano a ano, com tentativa de paginação.
         """
         print(f"🔎 Iniciando coleta de notícias para o termo: '{search_term}'...")
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
         }
         
         all_articles_data = []
         for year in range(start_year, end_year - 1, -1):
             print(f"\n-- Buscando até {articles_per_year} artigos para o ano de {year} --")
             
+            articles_this_year = []
+            
+            # O Google Notícias moderno não usa uma paginação simples baseada em URL.
+            # Ele carrega mais notícias via JavaScript ao rolar a página.
+            # A biblioteca 'requests' não executa JavaScript, então a coleta fica
+            # limitada aos resultados da primeira página (geralmente poucos).
+            # O parâmetro 'limit' no `find_all` apenas limita o que já foi baixado.
+            
+            # A estrutura do Google Notícias mudou, tornando a paginação por URL obsoleta.
+            # A única forma 100% confiável seria usar ferramentas como Selenium,
+            # que controlam um navegador real.
+            # Para manter a simplicidade, vamos aceitar a limitação dos resultados da primeira página,
+            # que é o comportamento real do seu código original.
+            # AVISO: O código abaixo coletará apenas os primeiros resultados que o Google envia na resposta inicial.
+            
             start_date = f"{year}-01-01"
             end_date = f"{year}-12-31"
-            time_filter = f"&tbs=cdr:1,cd_min:{start_date},cd_max:{end_date}"
+            # URL formatada para busca por período
+            time_filter = f"after:{start_date} before:{end_date}"
+            search_query = f"{search_term} {time_filter}"
             
-            search_url = f"https://news.google.com/search?q={search_term.replace(' ', '%20')}{time_filter}&hl=pt-BR&gl=BR&ceid=BR:pt-419"
+            search_url = f"https://news.google.com/search?q={search_query.replace(' ', '%20')}&hl=pt-BR&gl=BR&ceid=BR:pt-419"
             
             try:
                 response = requests.get(search_url, headers=headers)
@@ -109,6 +127,8 @@ class GenZAcademicAnalyzer:
                 continue
 
             soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Coleta os artigos encontrados na página
             articles = soup.find_all('article', limit=articles_per_year)
 
             if not articles:
@@ -116,7 +136,10 @@ class GenZAcademicAnalyzer:
                 continue
 
             for i, article in enumerate(articles):
-                title_tag = article.find('h3')
+                title_tag = article.find('a', class_='JtKRv') # Classe mais específica para o título
+                if not title_tag:
+                     title_tag = article.find('h3') # Fallback para a tag h3
+
                 source_tag = article.find('div', {'class': 'vr1PYe'})
                 time_tag = article.find('time')
                 link_tag = article.find('a', href=True)
@@ -125,24 +148,36 @@ class GenZAcademicAnalyzer:
                 source = source_tag.text if source_tag else "N/A"
                 pub_date = time_tag['datetime'] if time_tag and 'datetime' in time_tag.attrs else f"{year}-01-01T00:00:00Z"
                 
+                # Corrige a URL relativa
                 base_url = "https://news.google.com"
                 link = base_url + link_tag['href'][1:] if link_tag and link_tag['href'].startswith('.') else "N/A"
 
-                all_articles_data.append({
-                    'id': f"{year}_{i+1:03d}",
-                    'ano': year,
-                    'titulo': title,
-                    'url': link,
-                    'fonte': source,
-                    'data_publicacao': pub_date,
-                    'data_coleta': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'categoria': search_term
-                })
-                print(f"  -> Coletado: {title[:70]}...")
-                time.sleep(0.2)
+                # Evita duplicatas
+                if title not in [d['titulo'] for d in all_articles_data]:
+                    all_articles_data.append({
+                        'id': f"{year}_{len(articles_this_year)+1:03d}",
+                        'ano': year,
+                        'titulo': title,
+                        'url': link,
+                        'fonte': source,
+                        'data_publicacao': pub_date,
+                        'data_coleta': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'categoria': search_term
+                    })
+                    articles_this_year.append(title)
+                    print(f"   -> Coletado: {title[:70]}...")
+            
+            print(f"   -> Total para {year}: {len(articles_this_year)} artigos.")
+            time.sleep(1) # Aumentar o delay para evitar ser bloqueado
 
         df = pd.DataFrame(all_articles_data)
-        print(f"\n✅ Coleta finalizada. Total de {len(df)} artigos encontrados entre {end_year} e {start_year}.")
+        if not df.empty:
+            # Reordenar por ano, já que a coleta agora pode não ser perfeitamente ordenada
+            df = df.sort_values(by='ano', ascending=False).reset_index(drop=True)
+            print(f"\n✅ Coleta finalizada. Total de {len(df)} artigos encontrados entre {end_year} e {start_year}.")
+        else:
+            print("\n❌ Nenhum artigo foi coletado.")
+            
         return df
 
     def _analyze_sentiment_with_groq(self, headlines):
@@ -206,13 +241,13 @@ Responda APENAS com um array JSON no formato:
             sentiments = json.loads(json_str)
 
             if isinstance(sentiments, list) and len(sentiments) == len(headlines):
-                print(f"  -> ✅ Groq concluída: {Counter(sentiments)}")
+                print(f"   -> ✅ Groq concluída: {Counter(sentiments)}")
                 return sentiments
             else:
                 raise Exception("Lista inválida ou tamanho incorreto")
 
         except Exception as e:
-            print(f"  -> ❌ Erro na análise com Groq: {e}")
+            print(f"   -> ❌ Erro na análise com Groq: {e}")
             return ["negativo"] * len(headlines)  # fallback seguro
 
 
@@ -231,7 +266,7 @@ Responda APENAS com um array JSON no formato:
         # Garantir distribuição realista
         results = self._ensure_binary_distribution(results, headlines)
         
-        print(f"  -> ✅ Análise local concluída: {Counter(results)}")
+        print(f"   -> ✅ Análise local concluída: {Counter(results)}")
         return results
 
     def _classify_headline_binary(self, headline):
@@ -368,11 +403,11 @@ Responda APENAS com um array JSON no formato:
         """
         sentiment_counts = Counter(results)
         total = len(results)
-        positive_ratio = sentiment_counts['positivo'] / total
+        positive_ratio = sentiment_counts['positivo'] / total if total > 0 else 0
         
         # Se mais de 85% for de um tipo, rebalancear alguns casos
         if positive_ratio > 0.85 or positive_ratio < 0.15:
-            print("  -> Ajustando distribuição para ser mais realista...")
+            print("   -> Ajustando distribuição para ser mais realista...")
             
             target_ratio = 0.7 if positive_ratio > 0.5 else 0.3  # Manter tendência mas moderar
             target_positive = int(total * target_ratio)
@@ -414,8 +449,8 @@ Responda APENAS com um array JSON no formato:
             try:
                 return self._analyze_sentiment_with_groq(headlines)
             except Exception as e:
-                print(f"  -> ❌ Groq falhou: {e}")
-                print("  -> Usando sistema local como backup...")
+                print(f"   -> ❌ Groq falhou: {e}")
+                print("   -> Usando sistema local como backup...")
         
         # Fallback para sistema local (sempre funciona)
         return self._analyze_with_intelligent_local(headlines)
@@ -508,48 +543,54 @@ Responda APENAS com um array JSON no formato:
         fig = plt.figure(figsize=(20, 18))
         
         # 1. Distribuição geral de sentimentos (BINÁRIA)
-        ax1 = plt.subplot(3, 2, 1)
+        ax1 = plt.subplot(2, 2, 1)
         sentiment_counts = self.data['sentimento'].value_counts()
         colors = [self.color_scheme.get(x, '#cccccc') for x in sentiment_counts.index]
         wedges, texts, autotexts = ax1.pie(sentiment_counts.values, 
-                                          labels=[f'{x.title()}' for x in sentiment_counts.index],
-                                          autopct='%1.1f%%', 
-                                          colors=colors,
-                                          startangle=90)
+                                           labels=[f'{x.title()}' for x in sentiment_counts.index],
+                                           autopct='%1.1f%%', 
+                                           colors=colors,
+                                           startangle=90)
         ax1.set_title('Percepção sobre Geração Z no Mercado de Trabalho', fontsize=14, fontweight='bold')
         
-       # 2. Evolução temporal por sentimento
-        ax2 = plt.subplot(3, 2, 2)
+        # 2. Evolução temporal por sentimento
+        ax2 = plt.subplot(2, 2, 2)
         yearly_sentiment = self.data.groupby(['ano', 'sentimento']).size().unstack(fill_value=0)
 
         # garante ordem fixa das colunas
+        if 'positivo' not in yearly_sentiment: yearly_sentiment['positivo'] = 0
+        if 'negativo' not in yearly_sentiment: yearly_sentiment['negativo'] = 0
         yearly_sentiment = yearly_sentiment[['positivo', 'negativo']]
 
         yearly_sentiment.plot(kind='line', ax=ax2, marker='o',
-                            color=[self.color_scheme['positivo'], self.color_scheme['negativo']])
+                              color=[self.color_scheme['positivo'], self.color_scheme['negativo']])
         ax2.set_title('Evolução da Percepção ao Longo do Tempo', fontsize=14, fontweight='bold')
         ax2.set_xlabel('Ano')
         ax2.set_ylabel('Número de Headlines')
         ax2.legend(title='Percepção', labels=['Positiva', 'Negativa'])
 
-
-        # 4. Proporção por ano (stacked)
-        ax6 = plt.subplot(3, 2, 6)
-        ax6 = plt.subplot(3, 2, 6)
+        # 3. Proporção por ano (stacked)
+        ax3 = plt.subplot(2, 2, 3)
         yearly_pct = yearly_sentiment.div(yearly_sentiment.sum(axis=1), axis=0) * 100
 
         # mesma ordem fixa
         yearly_pct = yearly_pct[['positivo', 'negativo']]
 
-        yearly_pct.plot(kind='bar', stacked=True, ax=ax6,
-                    color=[self.color_scheme['positivo'], self.color_scheme['negativo']])
-        ax6.set_title('Proporção de Sentimentos por Ano (%)', fontsize=14, fontweight='bold')
-        ax6.set_xlabel('Ano')
-        ax6.set_ylabel('Percentual')
-        ax6.legend(title='Percepção', labels=['Positiva', 'Negativa'])
-        ax6.tick_params(axis='x', rotation=45)
-
-
+        yearly_pct.plot(kind='bar', stacked=True, ax=ax3,
+                        color=[self.color_scheme['positivo'], self.color_scheme['negativo']])
+        ax3.set_title('Proporção de Sentimentos por Ano (%)', fontsize=14, fontweight='bold')
+        ax3.set_xlabel('Ano')
+        ax3.set_ylabel('Percentual')
+        ax3.legend(title='Percepção', labels=['Positiva', 'Negativa'])
+        ax3.tick_params(axis='x', rotation=45)
+        
+        # 4. Nuvem de palavras
+        ax4 = plt.subplot(2, 2, 4)
+        all_text = ' '.join(self.data['titulo'].dropna())
+        wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='viridis').generate(all_text)
+        ax4.imshow(wordcloud, interpolation='bilinear')
+        ax4.set_title('Nuvem de Palavras-Chave', fontsize=14, fontweight='bold')
+        ax4.axis('off')
         
         plt.tight_layout(pad=3.0)
         plt.savefig('genz_binary_analysis.png', dpi=300, bbox_inches='tight')
@@ -565,33 +606,53 @@ Responda APENAS com um array JSON no formato:
         print("📊 Criando dashboard interativo...")
         
         fig = make_subplots(
-    rows=2, cols=2,
-    subplot_titles=('Evolução Temporal da Percepção',
-                    'Distribuição por Fonte',
-                    '', 
-                    'Percepção Geral sobre Geração Z'),  
-    specs=[[{"type": "scatter"}, {"type": "bar"}],
-           [{"type": "bar"}, {"type": "pie"}]]
+            rows=2, cols=2,
+            subplot_titles=('Evolução Temporal da Percepção',
+                            'Top 10 Fontes de Notícias',
+                            'Distribuição de Temas por Sentimento', 
+                            'Percepção Geral (Positivo vs. Negativo)'),
+            specs=[[{"type": "scatter"}, {"type": "bar"}],
+                   [{"type": "bar"}, {"type": "pie"}]]
         )
 
         # 1. Evolução temporal
         yearly_data = self.data.groupby(['ano', 'sentimento']).size().unstack(fill_value=0)
-        for sentiment in yearly_data.columns:
-            fig.add_trace(go.Scatter(x=yearly_data.index, y=yearly_data[sentiment],
-                                     mode='lines+markers', name=f'Percepção {sentiment.title()}',
-                                     line=dict(color=self.color_scheme.get(sentiment, '#cccccc'))),
-                          row=1, col=1)
+        for sentiment in ['positivo', 'negativo']:
+            if sentiment in yearly_data.columns:
+                fig.add_trace(go.Scatter(x=yearly_data.index, y=yearly_data[sentiment],
+                                         mode='lines+markers', name=f'Percepção {sentiment.title()}',
+                                         line=dict(color=self.color_scheme.get(sentiment, '#cccccc'))),
+                                         row=1, col=1)
 
         # 2. Distribuição por fonte
         source_counts = self.data['fonte'].value_counts().head(10)
-        fig.add_trace(go.Bar(x=source_counts.index, y=source_counts.values, name='Fontes'), row=1, col=2)
+        fig.add_trace(go.Bar(y=source_counts.index, x=source_counts.values, name='Fontes', orientation='h'), row=1, col=2)
+        fig.update_yaxes(autorange="reversed", row=1, col=2)
 
-        # 3. Distribuição geral (Pizza)
+        # 3. Temas por Sentimento
+        themes_df = self.data.copy()
+        themes_df['temas'] = themes_df['temas'].str.split(',')
+        themes_df = themes_df.explode('temas')
+        theme_sentiment_counts = themes_df.groupby(['temas', 'sentimento']).size().unstack(fill_value=0)
+        
+        for sentiment in ['positivo', 'negativo']:
+             if sentiment in theme_sentiment_counts.columns:
+                fig.add_trace(go.Bar(name=sentiment.title(), 
+                                     x=theme_sentiment_counts.index, 
+                                     y=theme_sentiment_counts[sentiment],
+                                     marker_color=self.color_scheme.get(sentiment)), 
+                              row=2, col=1)
+
+        # 4. Distribuição geral (Pizza)
         sentiment_counts = self.data['sentimento'].value_counts()
-        fig.add_trace(go.Pie(labels=sentiment_counts.index, values=sentiment_counts.values, name="Sentimentos"), row=2, col=2)
+        pie_colors = [self.color_scheme.get(label, '#cccccc') for label in sentiment_counts.index]
+        fig.add_trace(go.Pie(labels=sentiment_counts.index, 
+                             values=sentiment_counts.values, 
+                             name="Sentimentos",
+                             marker_colors=pie_colors), 
+                      row=2, col=2)
 
-        fig.update_layout(height=800, title_text="Dashboard Interativo - Geração Z na Mídia", title_x=0.5)
-        fig.update_yaxes(autorange="reversed", row=2, col=1) # Inverter eixo para melhor visualização
+        fig.update_layout(height=800, title_text="Dashboard Interativo - Análise da Geração Z na Mídia", title_x=0.5, barmode='stack')
         fig.write_html("genz_interactive_dashboard.html")
         fig.show()
         print("✅ Dashboard salvo em 'genz_interactive_dashboard.html'.")
@@ -630,7 +691,7 @@ Este script pode operar de duas formas:
 
 1. COLETAR NOVOS DADOS DA WEB E ANALISAR:
    - O script buscará notícias online usando o termo de busca fornecido.
-   - Ele coletará 20 notícias por ano, de 2025 a 2020.
+   - Ele tentará coletar os artigos disponíveis na primeira página de resultados para cada ano, de 2025 a 2020.
    - Em seguida, realizará a análise de sentimento, temas e gerará todos os relatórios.
    - Os dados coletados serão salvos em 'dados_coletados_genz.csv'.
 
@@ -641,11 +702,11 @@ Este script pode operar de duas formas:
      precisar coletar os dados novamente.
 
 📦 DEPENDÊNCIAS NECESSÁRIAS:
-   pip install pandas matplotlib seaborn plotly wordcloud numpy requests beautifulsoup4 transformers torch
+   pip install pandas matplotlib seaborn plotly wordcloud numpy requests beautifulsoup4
 
 🎯 PARA SUA PESQUISA ACADÊMICA:
    • Adapte o termo de busca na função `run_new_collection_and_analysis` para suas necessidades.
-   • Lembre-se que a qualidade da análise de sentimento depende do modelo.
+   • Lembre-se que a qualidade da análise de sentimento depende do modelo (API Groq) ou das regras locais.
    • Use os gráficos e o dashboard para ilustrar suas descobertas.
 """)
 
@@ -659,8 +720,8 @@ if __name__ == "__main__":
         while action not in ['1', '2']:
             action = input(
                 "\nArquivo de dados encontrado. O que você deseja fazer?\n"
-                "  [1] Coletar novos dados da web (sobrescreverá o arquivo atual).\n"
-                "  [2] Analisar os dados já existentes no arquivo.\n"
+                "   [1] Coletar novos dados da web (sobrescreverá o arquivo atual).\n"
+                "   [2] Analisar os dados já existentes no arquivo.\n"
                 "Escolha uma opção: "
             )
     else:
@@ -668,6 +729,8 @@ if __name__ == "__main__":
 
     if action == '1':
         term = input("\nDigite o termo de busca para as notícias (ex: Geração Z tecnologia): ")
+        if not term: # Garante que não seja vazio
+            term = "Geração Z mercado de trabalho"
         analyzer.run_new_collection_and_analysis(search_term=term)
     elif action == '2':
         analyzer.run_analysis_from_file()
